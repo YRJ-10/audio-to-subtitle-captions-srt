@@ -47,8 +47,8 @@ class SubtitleApp:
     def transcribe(self, filepath):
         try:
             if self.model is None:
-                # Menggunakan model 'small' untuk keseimbangan kecepatan dan akurasi
-                self.model = whisper.load_model("small")
+                # Menggunakan model 'base' (jauh lebih ringan dan sangat cepat untuk CPU)
+                self.model = whisper.load_model("base")
                 
             self.status.config(text="Status: Sedang mengenali suara dan membuat subtitle...")
             
