@@ -1,8 +1,12 @@
-import tkinter as tk
+import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import whisper
 import threading
 import os
+
+# Konfigurasi Tampilan Modern
+ctk.set_appearance_mode("System")  # Mengikuti tema Windows (Gelap/Terang)
+ctk.set_default_color_theme("blue")
 
 def format_timestamp(seconds: float):
     milliseconds = round(seconds * 1000.0)
@@ -14,20 +18,33 @@ def format_timestamp(seconds: float):
     milliseconds -= secs * 1_000
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
 
-class SubtitleApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Audio to Subtitle (Indonesian)")
-        self.root.geometry("450x250")
+class SubtitleApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Audio to Subtitle (Indonesian)")
+        self.geometry("500x320")
+        self.resizable(False, False)
         
-        self.label = tk.Label(root, text="Pilih file audio/video untuk dikonversi ke .srt", font=("Arial", 12))
-        self.label.pack(pady=20)
+        # Frame Kontainer Utama
+        self.frame = ctk.CTkFrame(self, corner_radius=15)
+        self.frame.pack(pady=20, padx=20, fill="both", expand=True)
         
-        self.btn_select = tk.Button(root, text="Pilih File & Proses", command=self.process_file, width=20, height=2, bg="#4CAF50", fg="white", font=("Arial", 10, "bold"))
-        self.btn_select.pack(pady=10)
+        # Judul Aplikasi
+        self.label = ctk.CTkLabel(self.frame, text="Konversi Audio/Video ke Subtitle", font=ctk.CTkFont(size=18, weight="bold"))
+        self.label.pack(pady=(20, 10))
         
-        self.status = tk.Label(root, text="Status: Menunggu file...", fg="blue", font=("Arial", 10))
-        self.status.pack(pady=20)
+        # Tombol Pilih File (Desain Modern)
+        self.btn_select = ctk.CTkButton(self.frame, text="Pilih File & Proses", command=self.process_file, height=45, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=10)
+        self.btn_select.pack(pady=15)
+        
+        # Progress Bar Animasi
+        self.progress = ctk.CTkProgressBar(self.frame, mode="indeterminate", width=350)
+        self.progress.pack(pady=10)
+        self.progress.set(0) # Sembunyikan pergerakan di awal
+        
+        # Status Label
+        self.status = ctk.CTkLabel(self.frame, text="Status: Menunggu file...", font=ctk.CTkFont(size=12))
+        self.status.pack(pady=(5, 20))
         
         self.model = None
 
@@ -39,23 +56,23 @@ class SubtitleApp:
         if not filepath:
             return
             
-        self.btn_select.config(state=tk.DISABLED)
-        self.status.config(text="Status: Memuat AI Model... (Hanya butuh waktu agak lama di awal)")
+        # Mengubah UI saat sedang proses
+        self.btn_select.configure(state="disabled")
+        self.status.configure(text="Status: Memuat AI Model... (Hanya butuh waktu agak lama di awal)", text_color="orange")
+        self.progress.start() # Jalankan animasi progress bar
         
+        # Jalankan di background agar UI tidak macet
         threading.Thread(target=self.transcribe, args=(filepath,), daemon=True).start()
         
     def transcribe(self, filepath):
         try:
             if self.model is None:
-                # Menggunakan model 'base' (jauh lebih ringan dan sangat cepat untuk CPU)
                 self.model = whisper.load_model("base")
                 
-            self.status.config(text="Status: Sedang mengenali suara dan membuat subtitle...")
+            self.status.configure(text="Status: Sedang memproses suara (Indikator jalan berarti tidak macet)...", text_color="#1E90FF")
             
-            # Transcribe dengan word_timestamps agar bisa dipisah lebih pendek
             result = self.model.transcribe(filepath, language="id", word_timestamps=True)
             
-            # Buat file .srt
             output_dir = os.path.dirname(filepath)
             filename = os.path.splitext(os.path.basename(filepath))[0]
             srt_path = os.path.join(output_dir, f"{filename}.srt")
@@ -72,7 +89,6 @@ class SubtitleApp:
                         segment_id += 1
                         continue
                         
-                    # Memecah subtitle maksimal 6 kata agar tidak menumpuk
                     chunk_words = []
                     chunk_start = words[0]['start']
                     
@@ -89,16 +105,17 @@ class SubtitleApp:
                             if i < len(words) - 1:
                                 chunk_start = words[i+1]['start']
             
-            self.status.config(text=f"Selesai! Disimpan sebagai: {filename}.srt")
-            messagebox.showinfo("Sukses", f"Subtitle berhasil dibuat dan disimpan di folder yang sama:\n\n{srt_path}")
+            self.status.configure(text=f"Selesai! Disimpan sebagai: {filename}.srt", text_color="green")
+            messagebox.showinfo("Sukses", f"Subtitle berhasil dibuat dan disimpan di folder:\n\n{srt_path}")
             
         except Exception as e:
-            self.status.config(text="Status: Terjadi kesalahan!")
-            messagebox.showerror("Error", f"Gagal memproses. Pastikan FFmpeg terinstall.\nDetail:\n{str(e)}")
+            self.status.configure(text="Status: Terjadi kesalahan!", text_color="red")
+            messagebox.showerror("Error", f"Gagal memproses.\nDetail:\n{str(e)}")
         finally:
-            self.btn_select.config(state=tk.NORMAL)
+            self.btn_select.configure(state="normal")
+            self.progress.stop()
+            self.progress.set(1) # Penuhi bar ketika selesai
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = SubtitleApp(root)
-    root.mainloop()
+    app = SubtitleApp()
+    app.mainloop()
