@@ -52,8 +52,8 @@ class SubtitleApp:
                 
             self.status.config(text="Status: Sedang mengenali suara dan membuat subtitle...")
             
-            # Transcribe khusus bahasa Indonesia
-            result = self.model.transcribe(filepath, language="id")
+            # Transcribe dengan word_timestamps agar bisa dipisah lebih pendek
+            result = self.model.transcribe(filepath, language="id", word_timestamps=True)
             
             # Buat file .srt
             output_dir = os.path.dirname(filepath)
@@ -61,11 +61,33 @@ class SubtitleApp:
             srt_path = os.path.join(output_dir, f"{filename}.srt")
             
             with open(srt_path, "w", encoding="utf-8") as f:
-                for i, segment in enumerate(result["segments"], start=1):
-                    start = format_timestamp(segment['start'])
-                    end = format_timestamp(segment['end'])
-                    text = segment['text'].strip()
-                    f.write(f"{i}\n{start} --> {end}\n{text}\n\n")
+                segment_id = 1
+                for seg in result["segments"]:
+                    words = seg.get("words", [])
+                    if not words:
+                        start = format_timestamp(seg['start'])
+                        end = format_timestamp(seg['end'])
+                        text = seg['text'].strip()
+                        f.write(f"{segment_id}\n{start} --> {end}\n{text}\n\n")
+                        segment_id += 1
+                        continue
+                        
+                    # Memecah subtitle maksimal 6 kata agar tidak menumpuk
+                    chunk_words = []
+                    chunk_start = words[0]['start']
+                    
+                    for i, w in enumerate(words):
+                        chunk_words.append(w['word'].strip())
+                        
+                        if len(chunk_words) >= 6 or i == len(words) - 1:
+                            start = format_timestamp(chunk_start)
+                            end = format_timestamp(w['end'])
+                            text = " ".join(chunk_words)
+                            f.write(f"{segment_id}\n{start} --> {end}\n{text}\n\n")
+                            segment_id += 1
+                            chunk_words = []
+                            if i < len(words) - 1:
+                                chunk_start = words[i+1]['start']
             
             self.status.config(text=f"Selesai! Disimpan sebagai: {filename}.srt")
             messagebox.showinfo("Sukses", f"Subtitle berhasil dibuat dan disimpan di folder yang sama:\n\n{srt_path}")
