@@ -4,6 +4,7 @@ import whisper
 import threading
 import os
 import shutil
+import subprocess
 
 # Konfigurasi Tampilan Modern
 ctk.set_appearance_mode("System")  # Mengikuti tema Windows (Gelap/Terang)
@@ -66,6 +67,7 @@ class SubtitleApp(ctk.CTk):
         self.format_var = ctk.StringVar(value="srt")
         self.words_var = ctk.StringVar(value="6")
         self.output_dir_var = ctk.StringVar(value="")
+        self.file_path_var = ctk.StringVar(value="")
 
         self.options_frame = ctk.CTkFrame(self.frame, fg_color="transparent")
         self.options_frame.pack(padx=24, pady=(8, 6), fill="x")
@@ -108,9 +110,43 @@ class SubtitleApp(ctk.CTk):
         self.output_button = ctk.CTkButton(self.output_frame, text="Pilih Folder", command=self.select_output_dir, width=120)
         self.output_button.grid(row=0, column=1)
 
-        # Tombol Pilih File (Desain Modern)
-        self.btn_select = ctk.CTkButton(self.frame, text="Pilih File & Proses", command=self.process_file, height=45, font=ctk.CTkFont(size=14, weight="bold"), corner_radius=10)
-        self.btn_select.pack(pady=15)
+        self.file_frame = ctk.CTkFrame(self.frame, fg_color="transparent")
+        self.file_frame.pack(padx=24, pady=(4, 10), fill="x")
+        self.file_frame.grid_columnconfigure(0, weight=1)
+
+        self.file_entry = ctk.CTkEntry(
+            self.file_frame,
+            textvariable=self.file_path_var,
+            placeholder_text="Belum ada file media dipilih"
+        )
+        self.file_entry.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        self.file_entry.configure(state="disabled")
+        self.file_button = ctk.CTkButton(self.file_frame, text="Pilih File", command=self.select_media_file, width=120)
+        self.file_button.grid(row=0, column=1)
+
+        self.action_frame = ctk.CTkFrame(self.frame, fg_color="transparent")
+        self.action_frame.pack(pady=12)
+
+        self.btn_select = ctk.CTkButton(
+            self.action_frame,
+            text="Mulai Proses",
+            command=self.process_file,
+            height=45,
+            width=170,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            corner_radius=10
+        )
+        self.btn_select.grid(row=0, column=0, padx=(0, 10))
+
+        self.btn_open_output = ctk.CTkButton(
+            self.action_frame,
+            text="Buka Folder Hasil",
+            command=self.open_output_folder,
+            height=45,
+            width=150,
+            state="disabled"
+        )
+        self.btn_open_output.grid(row=0, column=1, padx=(10, 0))
         
         # Progress Bar Animasi
         self.progress = ctk.CTkProgressBar(self.frame, mode="indeterminate", width=350)
@@ -124,6 +160,7 @@ class SubtitleApp(ctk.CTk):
         self.model = None
         self.model_name = None
         self.is_processing = False
+        self.last_output_path = None
         self.controls = [
             self.model_menu,
             self.language_menu,
@@ -131,6 +168,7 @@ class SubtitleApp(ctk.CTk):
             self.words_entry,
             self.output_entry,
             self.output_button,
+            self.file_button,
         ]
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -139,16 +177,35 @@ class SubtitleApp(ctk.CTk):
         if output_dir:
             self.output_dir_var.set(output_dir)
 
+    def select_media_file(self):
+        filepath = filedialog.askopenfilename(
+            title="Pilih File",
+            filetypes=(
+                ("Media Files", "*.mp3 *.wav *.m4a *.mp4 *.mkv *.mov *.aac *.flac"),
+                ("All Files", "*.*")
+            )
+        )
+        if filepath:
+            self.last_output_path = None
+            self.file_path_var.set(filepath)
+            self.update_output_button_state()
+            self.status.configure(text=f"Status: File siap diproses - {os.path.basename(filepath)}", text_color="gray")
+
     def process_file(self):
         if self.is_processing:
             messagebox.showinfo("Sedang Diproses", "Tunggu proses saat ini selesai dulu.")
             return
 
-        filepath = filedialog.askopenfilename(
-            title="Pilih File",
-            filetypes=(("Media Files", "*.mp3 *.wav *.m4a *.mp4 *.mkv"), ("All Files", "*.*"))
-        )
+        filepath = self.file_path_var.get().strip()
         if not filepath:
+            self.select_media_file()
+            filepath = self.file_path_var.get().strip()
+
+        if not filepath:
+            return
+
+        if not os.path.isfile(filepath):
+            messagebox.showerror("File Tidak Ditemukan", "File media yang dipilih tidak ditemukan.")
             return
 
         if shutil.which("ffmpeg") is None:
@@ -166,6 +223,7 @@ class SubtitleApp(ctk.CTk):
         # Mengubah UI saat sedang proses
         self.is_processing = True
         self.set_controls_state("disabled")
+        self.btn_open_output.configure(state="disabled")
         self.status.configure(text=f"Status: Memuat model {settings['model']}... proses pertama bisa agak lama.", text_color="orange")
         self.progress.start() # Jalankan animasi progress bar
         
@@ -275,9 +333,17 @@ class SubtitleApp(ctk.CTk):
         self.set_controls_state("normal")
         self.progress.stop()
         self.progress.set(0)
+        self.update_output_button_state()
+
+    def update_output_button_state(self):
+        if self.last_output_path and os.path.exists(self.last_output_path):
+            self.btn_open_output.configure(state="normal")
+        else:
+            self.btn_open_output.configure(state="disabled")
 
     def finish_success(self, output_path):
         def update_ui():
+            self.last_output_path = output_path
             self.status.configure(text=f"Selesai! Disimpan sebagai: {os.path.basename(output_path)}", text_color="green")
             self.reset_processing_ui()
             messagebox.showinfo("Sukses", f"Subtitle berhasil dibuat dan disimpan di:\n\n{output_path}")
@@ -299,6 +365,16 @@ class SubtitleApp(ctk.CTk):
             )
 
         self.after(0, update_ui)
+
+    def open_output_folder(self):
+        if not self.last_output_path or not os.path.exists(self.last_output_path):
+            messagebox.showinfo("Belum Ada Hasil", "Belum ada file hasil yang bisa dibuka.")
+            return
+
+        if os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(self.last_output_path)])
+        else:
+            subprocess.Popen(["open", os.path.dirname(self.last_output_path)])
 
     def on_close(self):
         if self.is_processing:
