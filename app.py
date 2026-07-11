@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox
 import whisper
 import threading
 import os
+import shutil
 
 # Konfigurasi Tampilan Modern
 ctk.set_appearance_mode("System")  # Mengikuti tema Windows (Gelap/Terang)
@@ -47,29 +48,44 @@ class SubtitleApp(ctk.CTk):
         self.status.pack(pady=(5, 20))
         
         self.model = None
+        self.is_processing = False
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def process_file(self):
+        if self.is_processing:
+            messagebox.showinfo("Sedang Diproses", "Tunggu proses saat ini selesai dulu.")
+            return
+
         filepath = filedialog.askopenfilename(
             title="Pilih File",
             filetypes=(("Media Files", "*.mp3 *.wav *.m4a *.mp4 *.mkv"), ("All Files", "*.*"))
         )
         if not filepath:
             return
-            
+
+        if shutil.which("ffmpeg") is None:
+            messagebox.showerror(
+                "FFmpeg Tidak Ditemukan",
+                "FFmpeg belum tersedia di Windows PATH.\n\n"
+                "Jalankan mulai_aplikasi.bat atau install FFmpeg dulu, lalu buka aplikasi lagi."
+            )
+            return
+
         # Mengubah UI saat sedang proses
+        self.is_processing = True
         self.btn_select.configure(state="disabled")
-        self.status.configure(text="Status: Memuat AI Model... (Hanya butuh waktu agak lama di awal)", text_color="orange")
+        self.status.configure(text="Status: Memuat AI model... proses pertama bisa agak lama.", text_color="orange")
         self.progress.start() # Jalankan animasi progress bar
         
         # Jalankan di background agar UI tidak macet
-        threading.Thread(target=self.transcribe, args=(filepath,), daemon=True).start()
+        threading.Thread(target=self.transcribe_worker, args=(filepath,), daemon=True).start()
         
-    def transcribe(self, filepath):
+    def transcribe_worker(self, filepath):
         try:
             if self.model is None:
                 self.model = whisper.load_model("base")
-                
-            self.status.configure(text="Status: Sedang memproses suara (Indikator jalan berarti tidak macet)...", text_color="#1E90FF")
+
+            self.set_status("Status: Sedang memproses suara... jangan tutup aplikasi dulu.", "#1E90FF")
             
             result = self.model.transcribe(filepath, language="id", word_timestamps=True)
             
@@ -105,16 +121,55 @@ class SubtitleApp(ctk.CTk):
                             if i < len(words) - 1:
                                 chunk_start = words[i+1]['start']
             
-            self.status.configure(text=f"Selesai! Disimpan sebagai: {filename}.srt", text_color="green")
-            messagebox.showinfo("Sukses", f"Subtitle berhasil dibuat dan disimpan di folder:\n\n{srt_path}")
+            self.finish_success(filename, srt_path)
             
         except Exception as e:
-            self.status.configure(text="Status: Terjadi kesalahan!", text_color="red")
-            messagebox.showerror("Error", f"Gagal memproses.\nDetail:\n{str(e)}")
-        finally:
-            self.btn_select.configure(state="normal")
-            self.progress.stop()
-            self.progress.set(1) # Penuhi bar ketika selesai
+            self.finish_error(e)
+
+    def set_status(self, text, color):
+        self.after(0, lambda: self.status.configure(text=text, text_color=color))
+
+    def reset_processing_ui(self):
+        self.is_processing = False
+        self.btn_select.configure(state="normal")
+        self.progress.stop()
+        self.progress.set(0)
+
+    def finish_success(self, filename, srt_path):
+        def update_ui():
+            self.status.configure(text=f"Selesai! Disimpan sebagai: {filename}.srt", text_color="green")
+            self.reset_processing_ui()
+            messagebox.showinfo("Sukses", f"Subtitle berhasil dibuat dan disimpan di:\n\n{srt_path}")
+
+        self.after(0, update_ui)
+
+    def finish_error(self, error):
+        error_text = str(error).strip() or error.__class__.__name__
+
+        def update_ui():
+            self.status.configure(text="Status: Gagal memproses file.", text_color="red")
+            self.reset_processing_ui()
+            messagebox.showerror(
+                "Error",
+                "Gagal memproses file.\n\n"
+                "Coba pastikan file media bisa dibuka, FFmpeg sudah terpasang, "
+                "dan ruang penyimpanan masih cukup.\n\n"
+                f"Detail:\n{error_text}"
+            )
+
+        self.after(0, update_ui)
+
+    def on_close(self):
+        if self.is_processing:
+            should_close = messagebox.askyesno(
+                "Proses Masih Berjalan",
+                "Transkripsi masih berjalan. Kalau aplikasi ditutup sekarang, proses akan dibatalkan.\n\n"
+                "Tetap tutup aplikasi?"
+            )
+            if not should_close:
+                return
+
+        self.destroy()
 
 if __name__ == "__main__":
     app = SubtitleApp()
